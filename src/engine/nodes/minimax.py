@@ -1,20 +1,21 @@
 from .base import BaseNode
 
-DEFAULT_MODEL = "MiniMax-M2.1"
+DEFAULT_MODEL = "MiniMax-M2.7"
 
 MINIMAX_CHAT_CONFIG = {
     "type": "minimax.chat",
     "name": "MiniMax Chat",
     "category": "action",
-    "description": "Genera respuestas de texto usando MiniMax M2.1",
+    "description": "Genera respuestas de texto usando MiniMax M2.7",
     "config_schema": {
         "type": "object",
         "properties": {
-            "model": {"type": "string", "default": DEFAULT_MODEL},
+            "model": {"type": "string", "default": "MiniMax-M2.7"},
             "messages": {"type": "array", "description": "Array de mensajes [{role, content}]"},
             "system": {"type": "string", "description": "Prompt del sistema"},
             "temperature": {"type": "number", "default": 0.7},
-            "max_tokens": {"type": "integer", "default": 2048}
+            "max_tokens": {"type": "integer", "default": 2048},
+            "stream": {"type": "boolean", "default": False}
         },
         "required": ["messages"]
     },
@@ -34,6 +35,7 @@ class MinimaxChatNode(BaseNode):
         system_prompt = self.config.get("system", "")
         temperature = self.config.get("temperature", 0.7)
         max_tokens = self.config.get("max_tokens", 2048)
+        stream = self.config.get("stream", False)
 
         messages_config = self.config.get("messages", [])
         resolved_messages = []
@@ -61,7 +63,8 @@ class MinimaxChatNode(BaseNode):
                     "model": model,
                     "messages": resolved_messages,
                     "temperature": temperature,
-                    "max_tokens": max_tokens
+                    "max_tokens": max_tokens,
+                    "stream": stream
                 },
                 timeout=60.0
             )
@@ -83,11 +86,12 @@ MINIMAX_TTS_CONFIG = {
     "config_schema": {
         "type": "object",
         "properties": {
-            "model": {"type": "string", "default": "speech-2.6-hd"},
+            "model": {"type": "string", "default": "speech-2.8-hd"},
             "text": {"type": "string"},
-            "voice_id": {"type": "string", "default": "English_Graceful_Lady"},
+            "voice_id": {"type": "string", "default": "English_expressive_narrator"},
             "speed": {"type": "number", "default": 1.0},
-            "output_format": {"type": "string", "default": "mp3"}
+            "emotion": {"type": "string", "default": "happy"},
+            "output_format": {"type": "string", "default": "hex"}
         },
         "required": ["text"]
     },
@@ -103,11 +107,29 @@ class MinimaxTTSNode(BaseNode):
         if not api_key:
             raise ValueError("MINIMAX_API_KEY not found in secrets")
 
-        model = self.config.get("model", "speech-2.6-hd")
+        model = self.config.get("model", "speech-2.8-hd")
         text = self.resolve_template(self.config.get("text"), context)
-        voice_id = self.config.get("voice_id", "English_Graceful_Lady")
+        voice_id = self.config.get("voice_id", "English_expressive_narrator")
         speed = self.config.get("speed", 1.0)
-        output_format = self.config.get("output_format", "mp3")
+        emotion = self.config.get("emotion", "happy")
+        output_format = self.config.get("output_format", "hex")
+
+        payload = {
+            "model": model,
+            "text": text,
+            "stream": False,
+            "output_format": output_format,
+            "voice_setting": {
+                "voice_id": voice_id,
+                "speed": speed,
+                "emotion": emotion
+            },
+            "audio_setting": {
+                "format": "mp3",
+                "sample_rate": 32000,
+                "bitrate": 128000
+            }
+        }
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -116,30 +138,19 @@ class MinimaxTTSNode(BaseNode):
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json"
                 },
-                json={
-                    "model": model,
-                    "text": text,
-                    "voice_setting": {
-                        "voice_id": voice_id,
-                        "speed": speed
-                    },
-                    "audio_setting": {
-                        "format": output_format,
-                        "sample_rate": 32000,
-                        "bitrate": 128000
-                    }
-                },
+                json=payload,
                 timeout=60.0
             )
             response.raise_for_status()
             data = response.json()
 
-        audio_content = data.get("audio_content", "")
+        audio_content = data.get("data", {}).get("audio", "")
         return {
             "audio": audio_content,
-            "format": output_format,
+            "format": data.get("extra_info", {}).get("audio_format", "mp3"),
             "model": model,
-            "text": text
+            "text": text,
+            "extra_info": data.get("extra_info", {})
         }
 
 
@@ -210,15 +221,15 @@ MINIMAX_MUSIC_CONFIG = {
     "type": "minimax.music",
     "name": "MiniMax Music",
     "category": "action",
-    "description": "Genera música con MiniMax music-2.0",
+    "description": "Genera música con MiniMax music-2.6",
     "config_schema": {
         "type": "object",
         "properties": {
-            "model": {"type": "string", "default": "music-2.0"},
+            "model": {"type": "string", "default": "music-2.6"},
             "prompt": {"type": "string"},
             "lyrics": {"type": "string"},
-            "duration": {"type": "integer", "default": 60},
-            "output_format": {"type": "string", "default": "mp3"}
+            "is_instrumental": {"type": "boolean", "default": False},
+            "output_format": {"type": "string", "default": "hex"}
         },
         "required": ["prompt"]
     },
@@ -234,17 +245,17 @@ class MinimaxMusicNode(BaseNode):
         if not api_key:
             raise ValueError("MINIMAX_API_KEY not found in secrets")
 
-        model = self.config.get("model", "music-2.0")
+        model = self.config.get("model", "music-2.6")
         prompt = self.resolve_template(self.config.get("prompt"), context)
         lyrics = self.resolve_template(self.config.get("lyrics"), context)
-        duration = self.config.get("duration", 60)
-        output_format = self.config.get("output_format", "mp3")
+        is_instrumental = self.config.get("is_instrumental", False)
+        output_format = self.config.get("output_format", "hex")
 
         payload = {
             "model": model,
             "prompt": prompt,
-            "duration": duration,
-            "output_format": output_format
+            "output_format": output_format,
+            "is_instrumental": is_instrumental
         }
         if lyrics:
             payload["lyrics"] = lyrics
@@ -262,11 +273,12 @@ class MinimaxMusicNode(BaseNode):
             response.raise_for_status()
             data = response.json()
 
+        music_data = data.get("data", {})
         return {
-            "audio": data.get("data", {}).get("audio", ""),
-            "audio_url": data.get("data", {}).get("audio_url", ""),
+            "audio": music_data.get("audio", ""),
+            "status": music_data.get("status"),
             "model": model,
-            "duration": data.get("extra_info", {}).get("music_duration", 0)
+            "extra_info": data.get("extra_info", {})
         }
 
 
@@ -278,7 +290,7 @@ MINIMAX_VISION_CONFIG = {
     "config_schema": {
         "type": "object",
         "properties": {
-            "model": {"type": "string", "default": "minimax-abab6"},
+            "model": {"type": "string", "default": "MiniMax-M2.7"},
             "messages": {"type": "array", "description": "Array de mensajes con contenido multimodal"}
         },
         "required": ["messages"]
@@ -295,7 +307,7 @@ class MinimaxVisionNode(BaseNode):
         if not api_key:
             raise ValueError("MINIMAX_API_KEY not found in secrets")
 
-        model = self.config.get("model", "minimax-abab6")
+        model = self.config.get("model", "MiniMax-M2.7")
         messages_config = self.config.get("messages", [])
 
         resolved_messages = []
@@ -350,7 +362,7 @@ MINIMAX_USAGE_CONFIG = {
     "type": "minimax.usage",
     "name": "MiniMax Usage",
     "category": "action",
-    "description": "Consulta el uso actual de quotas de MiniMax",
+    "description": "Consulta el uso remaining de Token Plan",
     "config_schema": {
         "type": "object",
         "properties": {},
@@ -370,7 +382,7 @@ class MinimaxUsageNode(BaseNode):
 
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                "https://api.minimax.io/v1/dashboardUsage",
+                "https://api.minimax.io/v1/api/openplatform/coding_plan/remains",
                 headers={"Authorization": f"Bearer {api_key}"},
                 timeout=30.0
             )
