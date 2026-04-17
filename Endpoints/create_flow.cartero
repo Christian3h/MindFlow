@@ -1,0 +1,21 @@
+version = 1
+url = "http://localhost:8080/flows?Content-Type=application/json"
+method = "POST"
+
+[body]
+type = "raw"
+format = "json"
+body = """
+{
+  "name": "test-flow",
+  "description": "Mi primer flow",
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "log",
+      "config": {
+        "message": "Hola mundo"
+      }
+    }
+  ]
+}"""

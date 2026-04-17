@@ -1,0 +1,12 @@
+version = 1
+url = "http://localhost:8080/flows/{{flow_id}}"
+method = "PUT"
+
+[body]
+type = "raw"
+format = "octet-stream"
+body = """
+{
+  "name": "nuevo-nombre",
+  "enabled": true
+}"""

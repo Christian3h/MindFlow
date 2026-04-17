@@ -103,7 +103,6 @@ class FlowExecutor:
         if not self.session:
             return
 
-        from sqlalchemy import update
         from src.models import Execution
 
         finished_at = datetime.utcnow().isoformat() if status in ("success", "failed") else None
@@ -118,5 +117,5 @@ class FlowExecutor:
             context=json.dumps(context.nodes)
         )
 
-        self.session.add(execution)
-        await self.session.commit()
+        await self.session.merge(execution)
+        await self.session.flush()
