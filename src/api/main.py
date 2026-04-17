@@ -3,13 +3,17 @@ from fastapi import FastAPI
 
 from src.models import init_db
 from src.api.routes import flows_router, secrets_router, executions_router, nodes_router
+from src.api.routes.assistant import router as assistant_router
 from src.engine import start_scheduler, stop_scheduler
+from src.assistant.db import init_db as init_assistant_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    print("Base de datos inicializada")
+    print("Base de datos engine inicializada")
+    await init_assistant_db()
+    print("Base de datos assistant inicializada")
     await start_scheduler()
     yield
     await stop_scheduler()
@@ -27,6 +31,7 @@ app.include_router(flows_router)
 app.include_router(secrets_router)
 app.include_router(executions_router)
 app.include_router(nodes_router)
+app.include_router(assistant_router)
 
 
 @app.get("/")
