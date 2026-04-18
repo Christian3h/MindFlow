@@ -179,6 +179,27 @@ async def telegram_webhook(request: Request, session: AsyncSession = Depends(get
                           "Decime: ¿cómo querés llamar a tu rutina y a qué hora querés que te la recuerde? "
                           "Ejemplo: 'creá mi rutina mañana a las 7am'")
             await save_conversation(asess, user_id, text, bot_response, intent)
+        elif intent == "deuda_registrar":
+            from src.assistant.flow_engine import handle_debt_registrar_intent
+            bot_response, flow_context = await handle_debt_registrar_intent(
+                asess, user_id, text, api_key, conversation_history, tono
+            )
+            sm.update_context(user_id, "pending_debt", flow_context)
+            await save_conversation(asess, user_id, text, bot_response, intent, flow_context)
+        elif intent == "sueldo_registrar":
+            from src.assistant.flow_engine import handle_sueldo_registrar_intent
+            bot_response, flow_context = await handle_sueldo_registrar_intent(
+                asess, user_id, text, api_key, conversation_history, tono
+            )
+            sm.update_context(user_id, "pending_income", flow_context)
+            await save_conversation(asess, user_id, text, bot_response, intent, flow_context)
+        elif intent == "deuda_pagar":
+            from src.assistant.flow_engine import handle_deuda_pagar_intent
+            bot_response, flow_context = await handle_deuda_pagar_intent(
+                asess, user_id, text, api_key, conversation_history, tono
+            )
+            sm.update_context(user_id, "pending_debt_payment", flow_context)
+            await save_conversation(asess, user_id, text, bot_response, intent, flow_context)
         else:
             bot_response = await call_minimax(api_key, text, conversation_history, tono)
             await save_conversation(asess, user_id, text, bot_response, intent)

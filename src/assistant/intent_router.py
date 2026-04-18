@@ -6,7 +6,8 @@ from typing import Optional
 INTENTS = [
     "saludo", "gasto", "sueno", "checkin", "pregunta", "despedida",
     "confirmacion", "evento_crear", "evento_completar", "evento_ver",
-    "pregunta_programada", "rutina_crear", "unknown"
+    "pregunta_programada", "rutina_crear", "deuda_registrar", "deuda_pagar",
+    "sueldo_registrar", "unknown"
 ]
 
 
@@ -99,6 +100,31 @@ RUTINA_CREAR_PATTERNS = [
     re.compile(r"program[áa]\s+mi\s+rutina", re.IGNORECASE),
 ]
 
+DEUDA_REGISTRAR_PATTERNS = [
+    re.compile(r"tengo\s+(?:una\s+)?deuda", re.IGNORECASE),
+    re.compile(r"debo\s+(?:en|a)?\s*(?:bancolombia|davivienda|bbva|bogota|nequi)", re.IGNORECASE),
+    re.compile(r"tengo\s+(?:un\s+)?cr[eé]dito", re.IGNORECASE),
+    re.compile(r"ped[ií]\s+(?:prestado|préstamo)", re.IGNORECASE),
+    re.compile(r"saqu[eé]?\s+(?:un\s+)?pr[eé]stamo", re.IGNORECASE),
+]
+
+DEUDA_PAGAR_PATTERNS = [
+    re.compile(r"voy\s+a\s+pagar\s+(?:la\s+)?(?:cuota|deuda)", re.IGNORECASE),
+    re.compile(r"voy\s+a\s+pagar\s+mi\s+(?:cuota|deuda)", re.IGNORECASE),
+    re.compile(r"pagu[eé]?\s+(?:la\s+)?(?:cuota|deuda)", re.IGNORECASE),
+    re.compile(r"abono\s+a\s+(?:la\s+)?(?:cuota|deuda)", re.IGNORECASE),
+    re.compile(r"voy\s+a\s+dar\s+(?:de\s+)?(?:paga|cuota)", re.IGNORECASE),
+]
+
+SUELDO_REGISTRAR_PATTERNS = [
+    re.compile(r"gan[ée]\s*[\d.,]+\s*(?:mil)?", re.IGNORECASE),
+    re.compile(r"tengo\s+(?:un\s+)?(?:sueldo|ingreso)", re.IGNORECASE),
+    re.compile(r"mi\s+(?:sueldo|salario)", re.IGNORECASE),
+    re.compile(r"recib[ií]\s+(?:mi\s+)?(?:sueldo|pago|ingreso)", re.IGNORECASE),
+    re.compile(r"me\s+pagaron", re.IGNORECASE),
+    re.compile(r"me\s+va\s+a\s+pagar", re.IGNORECASE),
+]
+
 
 def classify_intent(text: str) -> str:
     text = text.strip()
@@ -125,6 +151,12 @@ def classify_intent(text: str) -> str:
         return "pregunta_programada"
     if any(p.search(text) for p in RUTINA_CREAR_PATTERNS):
         return "rutina_crear"
+    if any(p.search(text) for p in DEUDA_REGISTRAR_PATTERNS):
+        return "deuda_registrar"
+    if any(p.search(text) for p in DEUDA_PAGAR_PATTERNS):
+        return "deuda_pagar"
+    if any(p.search(text) for p in SUELDO_REGISTRAR_PATTERNS):
+        return "sueldo_registrar"
 
     question_words = ["cómo", "qué", "cuándo", "dónde", "por qué", "para qué", "cuánto", "cuál"]
     if any(text.lower().startswith(w) for w in question_words):

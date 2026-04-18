@@ -7,6 +7,10 @@ from src.assistant.models import User, Conversation, Event
 from src.assistant.session_manager import get_session_manager
 from src.assistant.expense_parser import parse_multiple_expenses, format_expenses_response, should_ask_impulsive
 from src.assistant.expense_tracker import save_multiple_transactions, get_daily_total
+from src.assistant.debt_parser import parse_debt_creation, parse_debt_payment, format_debt_response, needs_cuota_confirmation
+from src.assistant.debt_tracker import save_debt, get_active_debts, get_debt_by_entity, record_debt_payment, get_debt_by_id
+from src.assistant.income_parser import parse_income, format_income_response, needs_presupuesto_pregunta
+from src.assistant.income_tracker import save_income, get_monthly_total, get_latest_income
 
 
 SYSTEM_PROMPTS = {
@@ -453,3 +457,139 @@ def format_events_response(events: list[Event]) -> str:
             lines.append(f"      [RECURRENTE] {event.frecuencia_recurrencia}")
     
     return "\n".join(lines)
+
+
+async def handle_debt_registrar_intent(
+    session: AsyncSession,
+    user_id: str,
+    text: str,
+    api_key: str,
+    conversation_history: list[dict],
+    system_tone: str = "default"
+) -> tuple[str, dict]:
+    parsed = parse_debt_creation(text)
+    
+    if not parsed:
+        return await call_minimax(api_key, text, conversation_history, system_tone), {}
+    
+    debt = await save_debt(
+        session=session,
+        user_id=user_id,
+        entidad=parsed.entidad,
+        monto_original=parsed.monto_original,
+        monto_actual=parsed.monto_actual,
+        cuota_valor=parsed.cuota_valor,
+        cuotas_totales=parsed.cuotas_totales,
+        notas=parsed.notas
+    )
+    
+    lines = [f"Deuda registrada en {debt.entidad}:"]
+    lines.append(f"  - Monto: ${float(debt.monto_original):,.0f}")
+    lines.append(f"  - Saldo actual: ${float(debt.monto_actual):,.0f}")
+    
+    if debt.cuota_valor:
+        lines.append(f"  - Valor cuota: ${float(debt.cuota_valor):,.0f}")
+    
+    context = {"debt_id": debt.id, "need_cuota": needs_cuota_confirmation(parsed)}
+    
+    if needs_cuota_confirmation(parsed):
+        lines.append("\nCual es el valor de la cuota mensual?")
+    
+    return "\n".join(lines), context
+
+
+async def handle_sueldo_registrar_intent(
+    session: AsyncSession,
+    user_id: str,
+    text: str,
+    api_key: str,
+    conversation_history: list[dict],
+    system_tone: str = "default"
+) -> tuple[str, dict]:
+    parsed = parse_income(text)
+    
+    if not parsed:
+        return await call_minimax(api_key, text, conversation_history, system_tone), {}
+    
+    income = await save_income(
+        session=session,
+        user_id=user_id,
+        monto=parsed.monto,
+        fuente=parsed.fuente,
+        notas=parsed.notas
+    )
+    
+    lines = [f"Ingreso registrado: ${income.monto:,.0f}"]
+    if income.fuente:
+        lines.append(f"Fuente: {income.fuente}")
+    
+    context = {"income_id": income.id, "need_presupuesto": needs_presupuesto_pregunta(parsed)}
+    
+    if needs_presupuesto_pregunta(parsed):
+        lines.append("\nEn que vas a usar ese dinero?")
+    
+    return "\n".join(lines), context
+
+
+async def handle_deuda_pagar_intent(
+    session: AsyncSession,
+    user_id: str,
+    text: str,
+    api_key: str,
+    conversation_history: list[dict],
+    system_tone: str = "default"
+) -> tuple[str, dict]:
+    debts = await get_active_debts(session, user_id)
+    
+    if not debts:
+        return "No tenes deudas registradas.", {}
+    
+    monto = parse_debt_payment(text)
+    
+    if monto:
+        deuda_match = None
+        for debt in debts:
+            if any(bank in text.lower() for bank in ["bancolombia", "davivienda", "bbva", "bogota"]):
+                if bank.lower() in debt.entidad.lower():
+                    deuda_match = debt
+                    break
+        
+        if not deuda_match and len(debts) == 1:
+            deuda_match = debts[0]
+        
+        if deuda_match:
+            payment = await record_debt_payment(
+                session=session,
+                debt_id=deuda_match.id,
+                user_id=user_id,
+                monto=monto
+            )
+            
+            remaining = float(deuda_match.monto_actual) - monto
+            lines = [f"Pago registrado: ${monto:,.0f}"]
+            lines.append(f"Para: {deuda_match.entidad}")
+            lines.append(f"Saldo restante: ${remaining:,.0f}")
+            
+            if remaining <= 0:
+                lines.append("Deuda saldada!")
+            
+            return "\n".join(lines), {"payment_id": payment.id}
+        else:
+            lines = ["Cual deuda queres pagar?"]
+            for debt in debts:
+                lines.append(f"  - {debt.entidad}: ${float(debt.monto_actual):,.0f}")
+            return "\n".join(lines), {}
+    else:
+        if len(debts) == 1:
+            debt = debts[0]
+            lines = [f"Para pagar {debt.entidad}:"]
+            if debt.cuota_valor:
+                lines.append(f"  Valor cuota: ${float(debt.cuota_valor):,.0f}")
+            lines.append(f"  Saldo actual: ${float(debt.monto_actual):,.0f}")
+            lines.append("\nCual es el monto que vas a pagar?")
+            return "\n".join(lines), {"debt_id": debt.id}
+        else:
+            lines = ["Cual deuda queres pagar?"]
+            for debt in debts:
+                lines.append(f"  - {debt.entidad}: ${float(debt.monto_actual):,.0f}")
+            return "\n".join(lines), {}
