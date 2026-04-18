@@ -10,12 +10,62 @@ from src.assistant.expense_tracker import save_multiple_transactions, get_daily_
 
 
 SYSTEM_PROMPTS = {
-    "amable": "Sos MindFlow, un coach personal amigable y empático. Ayudás al usuario a gestionar su día, sueño, finanzas y motivación. NO uses asteriscos, NO uses markdown, NO uses negritas. Siempre respondés en texto plano. No mostrás tu proceso de razonamiento interno. Tu tono es cálido y motivate. Si detectás que el usuario está decaído, lo motivás.",
-    "estricto": "Sos MindFlow, un coach personal directo y sin filtro. Decís las cosas como son. No suavizás las críticas. NO uses asteriscos, NO uses markdown, NO uses negritas. Siempre respondés en texto plano. No mostrás tu proceso de razonamiento interno.",
-    "sarcástico": "Sos MindFlow, un coach personal irónico pero motivador. Usás humor para señalar errores sin ser cruel. NO uses asteriscos, NO uses markdown, NO uses negritas. Siempre respondés en texto plano. No mostrás tu proceso de razonamiento interno.",
-    "neutral": "Sos MindFlow, un coach personal informativo. Sin emocionalismo, solo datos y hechos. NO usas asteriscos, NO usas markdown, NO usas negritas. Siempre respondés en texto plano. No mostrás tu proceso de razonamiento interno.",
-    "default": "Sos MindFlow, el asistente personal del usuario. Ayudás con sueño, finanzas, rutina y motivación. NO uses asteriscos, NO uses markdown, NO uses negritas. Siempre respondés en texto plano. No mostrás tu proceso de razonamiento interno. Respondé de forma concisa y útil."
+    "amable": "Sos MindFlow, un coach personal amigable y empático. Ayudás al usuario a gestionar su día, sueño, finanzas y motivación. NO usás asteriscos, NO usás markdown, NO usás negritas. Siempre respondés en texto plano. No mostrás tu proceso de razonamiento interno. Tu tono es cálido y motivate. Si detectás que el usuario está decaído, lo motivás.",
+    "estricto": "Sos MindFlow, un coach personal directo y sin filtro. Decís las cosas como son. No suavizás las críticas. NO usás asteriscos, NO usás markdown, NO usás negritas. Siempre respondés en texto plano. No mostrás tu proceso de razonamiento interno.",
+    "sarcástico": "Sos MindFlow, un coach personal irónico pero motivador. Usás humor para señalar errores sin ser cruel. NO usás asteriscos, NO usás markdown, NO usás negritas. Siempre respondés en texto plano. No mostrás tu proceso de razonamiento interno.",
+    "neutral": "Sos MindFlow, un coach personal informativo. Sin emocionalismo, solo datos y hechos. NO usás asteriscos, NO usás markdown, NO usás negritas. Siempre respondés en texto plano. No mostrás tu proceso de razonamiento interno.",
+    "default": "Sos MindFlow, el asistente personal del usuario. Ayudás con sueño, finanzas, rutina y motivación. NO usás asteriscos, NO usás markdown, NO usás negritas. Siempre respondés en texto plano. No mostrás tu proceso de razonamiento interno. Respondé de forma concisa y útil."
 }
+
+
+def get_time_context() -> str:
+    now = datetime.now()
+    return (
+        f"Hora actual del servidor: {now.strftime('%H:%M')} "
+        f"({now.strftime('%A %d de %B de %Y')}). "
+        f"Cuando el usuario dice 'en X minutos' o 'dentro de X minutos', "
+        f"calculá la hora sumando X minutos a la hora actual. "
+        f"Cuando dice 'en X horas', sumá X horas. "
+        f"Cuando dice 'mañana', referite a { (now + timedelta(days=1)).strftime('%d/%m/%Y') }. "
+        f"Cuando dice 'hoy', referite a { now.strftime('%d/%m/%Y') }."
+    )
+
+
+def parse_relative_time(text: str) -> tuple[str | None, str | None]:
+    """
+    Parsea expresiones relativas como 'en 5 minutos', 'dentro de 1 hora'.
+    Returns (fecha, hora) en formato YYYY-MM-DD HH:MM o (None, None) si no matchea.
+    """
+    text_lower = text.lower()
+    now = datetime.now()
+
+    minuto_match = re.search(r"(?:en|dentro\s+de)\s+(\d+)\s*minutos?", text_lower)
+    if minuto_match:
+        mins = int(minuto_match.group(1))
+        target = now + timedelta(minutes=mins)
+        return target.strftime("%Y-%m-%d"), target.strftime("%H:%M"), mins
+
+    hora_match = re.search(r"(?:en\s+|dentro\s+de\s+)(\d+)\s*horas?", text_lower)
+    if hora_match:
+        horas = int(hora_match.group(1))
+        target = now + timedelta(hours=horas)
+        return target.strftime("%Y-%m-%d"), target.strftime("%H:%M"), horas * 60
+
+    dia_match = re.search(r"(?:en\s+|dentro\s+de\s+)(\d+)\s*dias?", text_lower)
+    if dia_match:
+        dias = int(dia_match.group(1))
+        target = now + timedelta(days=dias)
+        return target.strftime("%Y-%m-%d"), target.strftime("%H:%M"), dias * 24 * 60
+
+    if re.search(r"ma[nñ]ana", text_lower):
+        target = now + timedelta(days=1)
+        return target.strftime("%Y-%m-%d"), target.strftime("%H:%M"), 24 * 60
+
+    if re.search(r"pasado\s*man[nñ]ana", text_lower):
+        target = now + timedelta(days=2)
+        return target.strftime("%Y-%m-%d"), target.strftime("%H:%M"), 48 * 60
+
+    return None, None, None
 
 
 async def get_or_create_user(session: AsyncSession, user_id: str, nombre: str | None = None) -> User:
@@ -110,6 +160,8 @@ async def call_minimax(
     system_tone: str = "default"
 ) -> str:
     system_prompt = SYSTEM_PROMPTS.get(system_tone, SYSTEM_PROMPTS["default"])
+    time_context = get_time_context()
+    system_prompt = f"{time_context}\n\n{system_prompt}"
 
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(conversation_history)
@@ -133,22 +185,7 @@ async def call_minimax(
         )
         response.raise_for_status()
         data = response.json()
-
-        # Extraer solo el contenido sin el reasoning
-        raw_content = data["choices"][0]["message"]["content"]
-        
-        # El formato es: [instrucciones internas]\n<think>\n[reasoning]\n\n[respuesta real]
-        # Nos quedamos solo con la última parte después del último \n\n\n
-        parts = raw_content.split("<think>")
-        content = parts[-1].strip() if len(parts) > 1 else raw_content.strip()
-        
-        # Si todavía tiene reasoning residual (por ejemplo "El usuario dice...\n\n\nHola")
-        # nos quedamos solo con la última oración/parte
-        content_parts = content.split("\n\n\n")
-        if len(content_parts) > 1:
-            content = content_parts[-1].strip()
-        
-        return content
+        return data["choices"][0]["message"]["content"]
 
 
 def parse_event_from_text(text: str) -> dict | None:
@@ -178,7 +215,35 @@ def parse_event_from_text(text: str) -> dict | None:
                 hour += 12
             elif period.lower() == "am" and hour == 12:
                 hour = 0
+        else:
+            noche_keywords = ["dormir", "dormir", "noche", "cama", "sueño", "sueno", "acostado", "dormi"]
+            is_noche = any(kw in text_lower for kw in noche_keywords)
+            
+            if is_noche:
+                if hour == 12:
+                    hour = 0
+            else:
+                ahora = datetime.now()
+                if hour >= 13 and hour <= 23:
+                    pass
+                elif hour < ahora.hour:
+                    if hour < 12:
+                        hour += 12
+                elif hour == ahora.hour:
+                    pass
+                else:
+                    if hour > 12 and ahora.hour < 12:
+                        hour -= 12
         hora = f"{hour:02d}:{minute:02d}"
+    
+    fecha_relativa, hora_relativa, anticipacion_minutos = parse_relative_time(text)
+    if fecha_relativa:
+        fecha = fecha_relativa
+        if hora_relativa:
+            hora = hora_relativa
+    else:
+        fecha = None
+        anticipacion_minutos = None
     
     fecha_map = {
         "pasado mañana": datetime.now() + timedelta(days=2),
@@ -188,14 +253,14 @@ def parse_event_from_text(text: str) -> dict | None:
         "hoy": datetime.now(),
     }
     
-    fecha = None
-    for fecha_str, fecha_obj in fecha_map.items():
-        if fecha_str in text_lower:
-            fecha = fecha_obj.strftime("%Y-%m-%d")
-            break
+    if not fecha:
+        for fecha_str, fecha_obj in fecha_map.items():
+            if fecha_str in text_lower:
+                fecha = fecha_obj.strftime("%Y-%m-%d")
+                break
     
     if not fecha:
-        dia_match = re.search(r"(\d{1,2})(?:\s*(?:de\s+)?|\s*[/]\s*)(?:ene(?:ro)?|feb(?:rero)?|mar(?:zo)?|abr(?:il)?|may(?:o)?|jun(?:io)?|jul(?:io)?|ago(?:sto)?|sep(?:tiembre)?|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?|\d{1,2})?(?:\s*[/]\s*(\d{1,2}))?", text, re.IGNORECASE)
+        dia_match = re.search(r"(?<!\d)(\d{1,2})(?:\s*(?:de\s+)?|\s*[/]\s*)(?:ene(?:ro)?|feb(?:rero)?|mar(?:zo)?|abr(?:il)?|may(?:o)?|jun(?:io)?|jul(?:io)?|ago(?:sto)?|sep(?:tiembre)?|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?)(?:\s*[/]\s*(\d{1,2}))?(?!\d)", text, re.IGNORECASE)
         if dia_match:
             try:
                 dia = int(dia_match.group(1))
@@ -219,20 +284,53 @@ def parse_event_from_text(text: str) -> dict | None:
         recurrente = 1
         frecuencia = "anual"
     
-    titulo_match = re.search(r"(?:cita con|con|evento:|recordatorio:?|agend[áa]?|program[áa]?)?\s*(?:que\s+)?(?:tengo|tiene)?\s*(?:una?\s+)?(?:cita\s+con\s+)?([^.!?\n]{3,50}?)(?:\s*(?:a\s+las|hora|hrs?|h)?\s*\d|$)", text, re.IGNORECASE)
     titulo = None
-    if titulo_match:
-        titulo = titulo_match.group(1).strip()
-        titulo = re.sub(r"^(con|con\s+el?|con\s+la?)\s+", "", titulo, flags=re.IGNORECASE)
-        titulo = titulo.strip()
     
+    hacer_match = re.search(r"hacer\s+(?:mi\s+)?(.+?)$", text, re.IGNORECASE)
+    if hacer_match:
+        raw = hacer_match.group(1).strip()
+        skip = {"duolingo", "practica", "ejercicio", "tarea", "recha", "deber", "la", "el", "mi", "que", "una", "un"}
+        words = [w for w in raw.split() if w.lower() not in skip and len(w) > 1]
+        titulo = " ".join(words) if words else raw
+    
+    if not titulo or len(titulo) < 3:
+        cita_match = re.search(r"reunion\s+con\s+(.+?)(?:\s*$|$)", text, re.IGNORECASE)
+        if cita_match:
+            titulo = f"Reunion con {cita_match.group(1).strip()}"
+        else:
+            cita_match2 = re.search(r"cita\s+con\s+(.+?)(?:\s+a\s+las|$)", text, re.IGNORECASE)
+            if cita_match2:
+                titulo = f"Cita con {cita_match2.group(1).strip()}"
+            else:
+                tengo_match = re.search(r"tengo\s+(?:que\s+)?(.+?)(?:\s+dentro|$)", text, re.IGNORECASE)
+                if tengo_match:
+                    titulo = tengo_match.group(1).strip()
+                else:
+                    reunion_match = re.search(r"(?:la\s+)?reunion\s+(?:con\s+)?(.+?)$", text, re.IGNORECASE)
+                    if reunion_match:
+                        titulo = f"Reunion con {reunion_match.group(1).strip()}"
+    
+    if not titulo or len(titulo) < 3:
+        tarea_match = re.search(r"(?:mi\s+)?tarea\s+(?:de\s+)?(.+?)$", text, re.IGNORECASE)
+        if tarea_match:
+            titulo = f"Tarea de {tarea_match.group(1).strip()}"
+        else:
+            titulo_match = re.search(r"(?:la\s+)?reunion\s+(?:con\s+)?(.+?)$", text, re.IGNORECASE)
+            if titulo_match:
+                titulo = f"Reunion con {titulo_match.group(1).strip()}"
+    
+    if not titulo or len(titulo) < 3:
+        titulo = f"Evento {datetime.now().strftime('%H:%M')}"
+    
+    titulo = re.sub(r"^(de|del|para|con|en|es|una|un)\s+", "", titulo, flags=re.IGNORECASE).strip()
     if not titulo:
-        words = text.split()
-        skip_words = {"agregá", "agrega", "creá", "crea", "nuevo", "nueva", "programá", "programa", "recordame", "recuerda", "que", "ten", "tengo", "una", "un", "para", "el", "la"}
-        titulo = " ".join([w for w in words if w.lower() not in skip_words and len(w) > 2])[:50]
+        titulo = f"Evento {datetime.now().strftime('%H:%M')}"
     
-    if not titulo or len(titulo) < 2:
-        titulo = f"Evento {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    anticipacion = 24
+    if anticipacion_minutos is not None and anticipacion_minutos > 0:
+        anticipacion = max(1, anticipacion_minutos // 60)
+        if anticipacion_minutos < 60:
+            anticipacion = 1
     
     return {
         "titulo": titulo,
@@ -241,7 +339,8 @@ def parse_event_from_text(text: str) -> dict | None:
         "tipo": tipo,
         "recurrente": recurrente,
         "frecuencia_recurrencia": frecuencia,
-        "anticipacion_aviso_horas": 24
+        "anticipacion_aviso_horas": anticipacion,
+        "anticipacion_minutos": anticipacion_minutos
     }
 
 
@@ -255,6 +354,7 @@ async def create_event(session: AsyncSession, user_id: str, event_data: dict) ->
     recurrente = event_data.get("recurrente", 0)
     frecuencia = event_data.get("frecuencia_recurrencia")
     anticipacion = event_data.get("anticipacion_aviso_horas", 24)
+    anticipacion_minutos = event_data.get("anticipacion_minutos")
     
     event = Event(
         user_id=user_id,
@@ -265,6 +365,7 @@ async def create_event(session: AsyncSession, user_id: str, event_data: dict) ->
         recurrente=recurrente,
         frecuencia_recurrencia=frecuencia,
         anticipacion_aviso_horas=anticipacion,
+        anticipacion_aviso_minutos=anticipacion_minutos,
         completado=0
     )
     
