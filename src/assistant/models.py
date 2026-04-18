@@ -51,6 +51,8 @@ class Routine(Base):
     nombre = Column(String, nullable=False)
     activa = Column(Integer, default=1)
     dias_semana = Column(String, nullable=True)
+    hora_recordatorio = Column(String, nullable=True)
+    anticipacion_minutos = Column(Integer, default=15)
 
 
 class RoutineBlock(Base):
@@ -106,6 +108,7 @@ class Event(Base):
     recurrente = Column(Integer, default=0)
     frecuencia_recurrencia = Column(String, nullable=True)
     anticipacion_aviso_horas = Column(Integer, default=24)
+    anticipacion_aviso_minutos = Column(Integer, default=None)
     completado = Column(Integer, default=0)
 
 
@@ -123,3 +126,59 @@ class DailySummary(Base):
     gasto_total_dia = Column(String, nullable=True)
     estado_animo = Column(String, nullable=True)
     notas_bot = Column(Text, nullable=True)
+
+
+class ScheduledQuestion(Base):
+    __tablename__ = "scheduled_questions"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, nullable=False)
+    pregunta = Column(Text, nullable=False)
+    cron_expr = Column(String, nullable=False)
+    respuesta_parser = Column(String, nullable=True)
+    datos_guardar = Column(Text, nullable=True)
+    activo = Column(Integer, default=1)
+    ultimo_envio = Column(String, nullable=True)
+    ultiman_respuesta = Column(Text, nullable=True)
+    fecha_creacion = Column(String, default=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class Debt(Base):
+    __tablename__ = "debts"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, nullable=False)
+    entidad = Column(String, nullable=False)
+    monto_original = Column(String, nullable=False)
+    monto_actual = Column(String, nullable=False)
+    cuota_valor = Column(String, nullable=True)
+    cuota_numero = Column(Integer, nullable=True)
+    cuotas_totales = Column(Integer, nullable=True)
+    fecha_inicio = Column(String, nullable=True)
+    fecha_creacion = Column(String, default=lambda: datetime.now(timezone.utc).isoformat())
+    activa = Column(Integer, default=1)
+    notas = Column(Text, nullable=True)
+
+
+class Income(Base):
+    __tablename__ = "incomes"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, nullable=False)
+    monto = Column(String, nullable=False)
+    fuente = Column(String, nullable=True)
+    fecha = Column(String, nullable=False)
+    fecha_creacion = Column(String, default=lambda: datetime.now(timezone.utc).isoformat())
+    notas = Column(Text, nullable=True)
+
+
+class DebtPayment(Base):
+    __tablename__ = "debt_payments"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    debt_id = Column(String, nullable=False)
+    user_id = Column(String, nullable=False)
+    monto = Column(String, nullable=False)
+    fecha = Column(String, nullable=False)
+    fecha_creacion = Column(String, default=lambda: datetime.now(timezone.utc).isoformat())
+    notas = Column(Text, nullable=True)

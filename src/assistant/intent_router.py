@@ -3,7 +3,11 @@ from dataclasses import dataclass
 from typing import Optional
 
 
-INTENTS = ["saludo", "gasto", "sueno", "checkin", "pregunta", "despedida", "confirmacion", "evento_crear", "evento_completar", "evento_ver", "unknown"]
+INTENTS = [
+    "saludo", "gasto", "sueno", "checkin", "pregunta", "despedida",
+    "confirmacion", "evento_crear", "evento_completar", "evento_ver",
+    "pregunta_programada", "rutina_crear", "unknown"
+]
 
 
 GASTO_PATTERNS = [
@@ -76,6 +80,25 @@ EVENTO_VER_PATTERNS = [
     re.compile(r"(?:que|qué)\s+tareas?\s+(?:tengo|tiene|para|del|de)?", re.IGNORECASE),
 ]
 
+PREGUNTA_PROGRAMADA_PATTERNS = [
+    re.compile(r"preg[úu]ntame\s+(?:cada|en|a\s+las)", re.IGNORECASE),
+    re.compile(r"record[áa]me\s+(?:cada|en|a\s+las|en\s+\d+\s*minutos?|en\s+\d+\s*horas?)", re.IGNORECASE),
+    re.compile(r"quisiera\s+que\s+me\s+preguntes", re.IGNORECASE),
+    re.compile(r"quiero\s+que\s+me\s+preguntes", re.IGNORECASE),
+    re.compile(r"program[áa]\s+(?:una\s+)?pregunta", re.IGNORECASE),
+    re.compile(r"cre[áa]\s+(?:una\s+)?pregunta\s+programada", re.IGNORECASE),
+    re.compile(r"quiero\s+que\s+me\s+recuerdes\s+dentro\s+de", re.IGNORECASE),
+    re.compile(r"dentro\s+de\s+\d+\s*(?:minutos?|horas?|dias?)\s+(?:que|de)?", re.IGNORECASE),
+]
+
+RUTINA_CREAR_PATTERNS = [
+    re.compile(r"agreg[áa]\s+(?:un[ao]?\s+)?rutina", re.IGNORECASE),
+    re.compile(r"cre[áa]\s+(?:un[ao]?\s+)?rutina", re.IGNORECASE),
+    re.compile(r"nueva\s+rutina", re.IGNORECASE),
+    re.compile(r"nuevo\s+bloque\s+de\s+tiempo", re.IGNORECASE),
+    re.compile(r"program[áa]\s+mi\s+rutina", re.IGNORECASE),
+]
+
 
 def classify_intent(text: str) -> str:
     text = text.strip()
@@ -98,6 +121,10 @@ def classify_intent(text: str) -> str:
         return "evento_completar"
     if any(p.search(text) for p in EVENTO_VER_PATTERNS):
         return "evento_ver"
+    if any(p.search(text) for p in PREGUNTA_PROGRAMADA_PATTERNS):
+        return "pregunta_programada"
+    if any(p.search(text) for p in RUTINA_CREAR_PATTERNS):
+        return "rutina_crear"
 
     question_words = ["cómo", "qué", "cuándo", "dónde", "por qué", "para qué", "cuánto", "cuál"]
     if any(text.lower().startswith(w) for w in question_words):
@@ -118,27 +145,29 @@ async def classify_intent_with_minimax(api_key: str, text: str) -> tuple[str, st
             action_description es una descripción corta de lo que el usuario quiere hacer
     """
     system_prompt = """Sos MindFlow, un clasificador de intenciones para un asistente personal.
-Tu trabajo es analizar el mensaje del usuario y determinar qué quiere.
+    Tu trabajo es analizar el mensaje del usuario y determinar qué quiere.
 
-Devolvé en formato JSON simple (sin markdown, sin asteriscos):
-{
-  "intent": "evento_crear|evento_ver|evento_completar|gasto|sueno|checkin|rutina|despedida|pregunta|coach|motivacion|oracion_general",
-  "descripcion": "breve descripción de lo que quiere el usuario (máx 10 palabras)"
-}
+    Devolvé en formato JSON simple (sin markdown, sin asteriscos):
+    {
+      "intent": "evento_crear|evento_ver|evento_completar|gasto|sueno|checkin|rutina|despedida|pregunta|coach|motivacion|pregunta_programada|rutina_crear|oracion_general",
+      "descripcion": "breve descripción de lo que quiere el usuario (máx 10 palabras)"
+    }
 
-Reglas:
-- Si quiere agregar/crear un evento, cita, reunión o recordatorio: "evento_crear"
-- Si quiere ver sus eventos, compromisos o agenda: "evento_ver"
-- Si quiere marcar algo como hecho o completado: "evento_completar"
-- Si menciona dinero/gasto/pagó/compró: "gasto"
-- Si menciona acostarse/levantarse/durmió/energía/sueño: "sueno"
-- Si menciona distracción, estaba en redes, no estaba estudiando: "checkin"
-- Si quiere agregar una rutina o bloque de tiempo: "rutina"
-- Si dice chau/adiós/hasta luego: "despedida"
-- Si hace una pregunta general: "pregunta"
-- Si pide motivación, empujón, está decaído: "coach"
-- En cualquier otro caso: "oracion_general"
-"""
+    Reglas:
+    - Si quiere agregar/crear un evento, cita, reunión o recordatorio: "evento_crear"
+    - Si quiere ver sus eventos, compromisos o agenda: "evento_ver"
+    - Si quiere marcar algo como hecho o completado: "evento_completar"
+    - Si menciona dinero/gasto/pagó/compró: "gasto"
+    - Si menciona acostarse/levantarse/durmió/energía/sueño: "sueno"
+    - Si menciona distracción, estaba en redes, no estaba estudiando: "checkin"
+    - Si quiere agregar una rutina o bloque de tiempo: "rutina_crear"
+    - Si dice chau/adiós/hasta luego: "despedida"
+    - Si hace una pregunta general: "pregunta"
+    - Si pide motivación, empujón, está decaído: "coach"
+    - Si quiere que el asistente le pregunte algo a cierta hora: "pregunta_programada"
+    - Si quiere programarrecordatorios de rutina: "rutina_crear"
+    - En cualquier otro caso: "oracion_general"
+    """
     
     messages = [
         {"role": "system", "content": system_prompt},
@@ -165,16 +194,13 @@ Reglas:
         data = response.json()
     
     raw_content = data["choices"][0]["message"]["content"]
-    # Remover markers de reasoning si hay
-    parts = raw_content.split("<think>")
-    content = parts[-1].strip() if len(parts) > 1 else raw_content.strip()
     
     # Parsear el JSON
     import json
     import re
     
     # Buscar JSON en el content
-    json_match = re.search(r'\{[^}]+\}', content, re.DOTALL)
+    json_match = re.search(r'\{[^}]+\}', raw_content, re.DOTALL)
     if json_match:
         try:
             parsed = json.loads(json_match.group())
@@ -183,4 +209,4 @@ Reglas:
             pass
     
     # Si no pudo parsear, default
-    return "oracion_general", content[:50]
+    return "oracion_general", raw_content[:50]
